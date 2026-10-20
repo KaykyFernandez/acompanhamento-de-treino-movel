@@ -242,10 +242,13 @@ function buzz(p = 15) {
   try { if (N) N.vibrate(Array.isArray(p) ? p.reduce((a, b) => a + b, 0) : p); else navigator.vibrate && navigator.vibrate(p); } catch (e) { }
 }
 let AC;
+const audio = () => AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+// iOS only lets audio start from a user gesture, so unlock the context on the first touch.
+document.addEventListener("pointerdown", () => { try { if (audio().state != "running") AC.resume(); } catch (e) { } }, { passive: true });
 function beep() {
   if (!S.settings.sound) return;
   try {
-    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    audio();
     [0, .2, .4].forEach((t, i) => {
       const o = AC.createOscillator(), g = AC.createGain(), st = AC.currentTime + t;
       o.frequency.value = i == 2 ? 1320 : 880; o.connect(g); g.connect(AC.destination);
@@ -254,7 +257,16 @@ function beep() {
     });
   } catch (e) { }
 }
-const keepAwake = on => { try { N && N.keepAwake(!!on && S.settings.awake); } catch (e) { } };
+/* Web fallback (iPhone): the Wake Lock API, re-acquired when the page comes back since the browser drops it when hidden. */
+let WL = null, wantAwake = false;
+const keepAwake = on => {
+  wantAwake = !!on && S.settings.awake;
+  try { if (N) { N.keepAwake(wantAwake); return; } } catch (e) { }
+  if (!navigator.wakeLock) return;
+  if (wantAwake && !WL) navigator.wakeLock.request("screen").then(l => { WL = l; l.addEventListener("release", () => { if (WL == l) WL = null; }); }).catch(() => { });
+  else if (!wantAwake && WL) { WL.release().catch(() => { }); WL = null; }
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden && wantAwake) keepAwake(true); });
 function applyTheme() {
   const t = S.settings.theme, dark = t == "auto" ? !matchMedia("(prefers-color-scheme: light)").matches : t == "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -264,6 +276,12 @@ function applyTheme() {
 }
 function saveFile(name, text) {
   if (N && N.saveFile) { N.saveFile(name, text); return; }
+  // iPhone: downloads from a home-screen app are unreliable, so hand the file to the share sheet ("Salvar em Arquivos").
+  const file = new File([text], name, { type: "application/json" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file] }).then(() => toast("Backup salvo", "check"), e => { if (e.name != "AbortError") toast("Backup não foi salvo", "info"); });
+    return;
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
   a.download = name; document.body.appendChild(a); a.click(); a.remove();

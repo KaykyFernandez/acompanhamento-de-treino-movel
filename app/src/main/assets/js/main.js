@@ -292,3 +292,5 @@ applyTheme();
 render();
 if (S.active) keepAwake(true);
 if (!S.profile.onboarded) openOb();
+// Offline cache for the web/iPhone version; the Android app serves its files locally.
+if (!N && "serviceWorker" in navigator && location.protocol == "https:") navigator.serviceWorker.register("sw.js").catch(() => { });
